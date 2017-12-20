@@ -1,0 +1,112 @@
+heat_template_version: 2014-10-16
+
+description: >
+  This is a nested stack that defines a single Kubernetes master, This stack is
+  included by an ResourceGroup resource in the parent template
+  (kubecluster.yaml).
+
+parameters:
+
+  name:
+    type: string
+    description: server name
+
+  server_image:
+    type: string
+    description: glance image used to boot the server
+
+  master_flavor:
+    type: string
+    description: flavor to use when booting the server
+
+  ssh_key_name:
+    type: string
+    description: name of ssh key to be provisioned on our server
+
+  fixed_network:
+    type: string
+    description: Network from which to allocate fixed addresses.
+
+  fixed_subnet:
+    type: string
+    description: Subnet from which to allocate fixed addresses.
+
+resources:
+
+  secgroup_kube_master:
+    type: OS::Neutron::SecurityGroup
+    properties:
+      rules:
+        - protocol: icmp
+        - protocol: tcp
+          port_range_min: 22
+          port_range_max: 22
+        - protocol: tcp
+          port_range_min: 7080
+          port_range_max: 7080
+        - protocol: tcp
+          port_range_min: 8080
+          port_range_max: 8080
+        - protocol: tcp
+          port_range_min: 2379
+          port_range_max: 2379
+        - protocol: tcp
+          port_range_min: 2380
+          port_range_max: 2380
+        - protocol: tcp
+          port_range_min: 6443
+          port_range_max: 6443
+        - protocol: tcp
+          port_range_min: 30000
+          port_range_max: 32767
+
+  make_cert:
+    type: OS::Heat::SoftwareConfig
+    properties:
+      group: ungrouped
+      config: {get_file: a_shell_script.sh}
+
+  kube_master_init:
+    type: OS::Heat::MultipartMime
+    properties:
+      parts:
+        - config: {get_resource: make_cert}
+
+  ######################################################################
+  #
+  # a single kubernetes master.
+  #
+
+  # do NOT use "_" (underscore) in the Nova server name
+  # it creates a mismatch between the generated Nova name and its hostname
+  # which can lead to weird problems
+  kube-master:
+    type: OS::Nova::Server
+    properties:
+      name: {get_param: name}
+      image: {get_param: server_image}
+      flavor: {get_param: master_flavor}
+      key_name: {get_param: ssh_key_name}
+      user_data_format: RAW
+      user_data: {get_resource: kube_master_init}
+      networks:
+        - port: {get_resource: kube_master_eth0}
+
+  kube_master_eth0:
+    type: OS::Neutron::Port
+    properties:
+      network: {get_param: fixed_network}
+      security_groups:
+        - {get_resource: secgroup_kube_master}
+      fixed_ips:
+        - subnet: {get_param: fixed_subnet}
+      allowed_address_pairs:
+        - ip_address: "10.100.0.0/16"
+      replacement_policy: AUTO
+
+outputs:
+
+  kube_master_ip:
+    value: {get_attr: [kube_master_eth0, fixed_ips, 0, ip_address]}
+    description: >
+      This is the "private" IP address of the Kubernetes master node.
