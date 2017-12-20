@@ -31,6 +31,10 @@ parameters:
     type: string
     description: Subnet from which to allocate fixed addresses.
 
+  external_network:
+    type: string
+    description: Subnet from which to allocate fixed addresses.
+
 resources:
 
   secgroup_kube_master:
@@ -104,9 +108,20 @@ resources:
         - ip_address: "10.100.0.0/16"
       replacement_policy: AUTO
 
+  kube_master_floating:
+    type: OS::Neutron::FloatingIP
+    properties:
+      floating_network: {get_param: external_network}
+      port_id: {get_resource: kube_master_eth0}
+
 outputs:
 
   kube_master_ip:
     value: {get_attr: [kube_master_eth0, fixed_ips, 0, ip_address]}
     description: >
       This is the "private" IP address of the Kubernetes master node.
+
+  kube_master_external_ip:
+    value: {get_attr: [kube_master_floating, floating_ip_address]}
+    description: >
+      This is the "public" IP address of the Kubernetes master node.
